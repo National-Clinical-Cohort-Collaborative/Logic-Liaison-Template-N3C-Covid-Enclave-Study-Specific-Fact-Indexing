@@ -1,0 +1,69 @@
+#* Study_Specific_Fact_Index_Summary:
+#*   desc: creates summary table of facts around user specified window
+#*   ext: py
+#*   inputs:
+#*   - visit_level_relative_facts
+#*   - Indicators
+#* 
+
+def Study_Specific_Fact_Index_Summary(visit_level_relative_facts, Indicators):
+    """
+    This template summarizes at a patient level whether the indicators
+    in the input fact table were set before, after, or during a window
+    around, the first instance of the index_col being set. The input
+    table indicators configures which indicator columns will appear in
+    the output and for which time period.
+    """
+
+    all_facts = visit_level_relative_facts
+    fusion_sheet = Indicators.filter(F.col("indicator_prefix")!='Long_COVID_diagnosis')
+
+    # Create lists of output columns
+    bonus_cols = ['person_id']
+    pre_columns = list(fusion_sheet.filter(fusion_sheet.study_index_pre_window_post.contains('pre')).select('indicator_prefix').distinct().toPandas()['indicator_prefix'])
+    pre_columns.extend(bonus_cols)
+    window_columns = list(fusion_sheet.filter(fusion_sheet.study_index_pre_window_post.contains('window')).select('indicator_prefix').distinct().toPandas()['indicator_prefix'])
+    window_columns.extend(bonus_cols)
+    post_columns = list(fusion_sheet.filter(fusion_sheet.study_index_pre_window_post.contains('post')).select('indicator_prefix').distinct().toPandas()['indicator_prefix'])
+    post_columns.extend(bonus_cols)
+
+    # Filter out any columns not in the input dataframe
+    pre_columns = list(set(all_facts.columns) & set(pre_columns))
+    window_columns = list(set(all_facts.columns) & set(window_columns))
+    post_columns = list(set(all_facts.columns) & set(post_columns))
+
+    df_pre_index = all_facts.where(all_facts['pre_'+'Long_COVID_diagnosis']==1).select(pre_columns)
+    df_index_window = all_facts.where(all_facts['Long_COVID_diagnosis'+'_window']==1).select(window_columns)
+    df_post_index = all_facts.where(all_facts['post_'+'Long_COVID_diagnosis']==1).select(post_columns)
+   
+   # Aggregate columns visit-level flags
+    df_pre_index = df_pre_index.groupby('person_id').agg(
+        *[F.max(col).alias(col+'_pre_'+'Long_COVID_diagnosis'+'_indicator') for col in df_pre_index.columns if col!='person_id'])
+    
+    df_index_window = df_index_window.groupby('person_id').agg(
+        *[F.max(col).alias(col+'_'+'Long_COVID_diagnosis'+'_window_indicator') for col in df_index_window.columns if col!='person_id'])
+
+    df_post_index = df_post_index.groupby('person_id').agg(
+        *[F.max(col).alias(col+'_post_'+'Long_COVID_diagnosis'+'_indicator') for col in df_post_index.columns if col!='person_id'])
+
+    # Unique patients with dates
+    non_indicator_cols = ['person_id','Long_COVID_diagnosis'+'_date'] + ["COVID_first_PCR_or_AG_lab_positive"]
+    pt = (all_facts
+        .select(*non_indicator_cols)
+        .distinct()
+    )
+
+    # Append pre, post, window flags
+    df = (pt
+        .join(df_pre_index, 'person_id', 'outer')
+        .join(df_index_window, 'person_id', 'outer')
+        .join(df_post_index, 'person_id', 'outer')
+    )
+
+    return df.na.fill(value=0, subset = [col for col in df.columns if col not in non_indicator_cols])
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+import pyspark.sql.functions as F

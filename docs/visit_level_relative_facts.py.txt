@@ -1,0 +1,51 @@
+#* visit_level_relative_facts:
+#*   desc: determines if visit occurred before, during, or after user specified window
+#*   ext: py
+#*   inputs:
+#*   - Cohort_all_facts_table_De_identified_
+#* 
+
+def visit_level_relative_facts(Cohort_all_facts_table_De_identified_):
+    """
+    This template accepts a visit-level facts table and the name of 
+    an indicator column (index_col) in the facts table as inputs. 
+    The output appends three additional columns to the facts table
+    indicating whether each visit occurred before, after, or during a
+    user-specified window around the first instance when the index_col
+    was set.
+    """
+    # Index date column
+    index_date_col = 'Long_COVID_diagnosis' + '_date'
+
+    # Get the min date for each patient with index_col==1
+    index_dates = (Cohort_all_facts_table_De_identified_
+        .filter(F.col('Long_COVID_diagnosis')==1)
+        .groupBy("person_id")
+        .agg(F.min("date").alias(index_date_col))
+    )
+
+    # Drops patients without an index_date
+    return (Cohort_all_facts_table_De_identified_
+        .join(index_dates, "person_id")
+        .withColumn('pre_'+'Long_COVID_diagnosis', 
+            F.when(F.col(index_date_col).isNull(), None)
+             .when(F.datediff(index_date_col,"date")>=0, 1)
+             .otherwise(0)
+        )
+        .withColumn('post_'+'Long_COVID_diagnosis', 
+            F.when(F.col(index_date_col).isNull(), None)
+             .when(F.datediff(index_date_col,"date")<0, 1)
+             .otherwise(0)
+        )
+        .withColumn('Long_COVID_diagnosis'+'_window',
+            F.when(F.col(index_date_col).isNull(), None)
+             .when(F.datediff(index_date_col,"date").between(-7,14), 1)
+             .otherwise(0)
+        )
+    )
+
+#################################################
+## Global imports and functions included below ##
+#################################################
+
+import pyspark.sql.functions as F
