@@ -1,1 +1,0 @@
-# Logic-Liaison-Template-N3C-Covid-Enclave-Study-Specific-Fact-Indexing
